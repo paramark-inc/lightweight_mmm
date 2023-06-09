@@ -1048,8 +1048,17 @@ def plot_media_baseline_contribution_area_plot(
   ax.set_ylabel("Baseline & Media Chanels Attribution")
   ax.set_xlabel("Period")
   ax.set_xlim(1, contribution_df_for_plot["period"].max())
-  ax.set_xticks(contribution_df_for_plot["period"])
-  ax.set_xticklabels(contribution_df_for_plot["period"])
+
+  # When there are more than 50 ticks on the X axis it becomes unreadable
+  if contribution_df_for_plot["period"].shape[0] < 50:
+    ticks = contribution_df_for_plot["period"]
+  else:
+    quantiles = [n * 0.02 for n in range(50)]
+    ticks = contribution_df_for_plot["period"].quantile(quantiles).round().astype(int)
+
+  ax.set_xticks(ticks)
+  ax.set_xticklabels(ticks)
+
   # Get handles and labels for sorting.
   handles, labels = ax.get_legend_handles_labels()
   # If true, legend_outside reversed the legend and puts the legend center left,
