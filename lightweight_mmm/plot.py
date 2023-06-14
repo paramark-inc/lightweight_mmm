@@ -1217,6 +1217,7 @@ def _collect_features_for_prior_posterior_plot(
     channel_level_features: List of all channel-level features for the given
     model type.
     seasonal_features: List of all seasonal features for the given model type.
+    weekday_features: List of weekday features for the given model type.
     other_features: List of all other features for the given media_mix_model.
 
   Raises:
@@ -1276,13 +1277,13 @@ def _collect_features_for_prior_posterior_plot(
       "coef_media",
   ]
   seasonal_features = [models._GAMMA_SEASONALITY]
-  if media_mix_model._weekday_seasonality:
-    seasonal_features.append(models._WEEKDAY)
+  weekday_features = [models._WEEKDAY] if media_mix_model._weekday_seasonality else []
+
   other_features = list(set(features) - set(geo_level_features) -
-                        set(channel_level_features) - set(seasonal_features))
+                        set(channel_level_features) - set(seasonal_features) - set(weekday_features))
 
   return (list(features), geo_level_features, channel_level_features,
-          seasonal_features, other_features)
+          seasonal_features, weekday_features, other_features)
 
 
 def plot_prior_and_posterior(
@@ -1321,7 +1322,7 @@ def plot_prior_and_posterior(
     ValueError: A feature has been created without a well-defined prior.
   """
 
-  (features, geo_level_features, channel_level_features, seasonal_features,
+  (features, geo_level_features, channel_level_features, seasonal_features, weekday_features,
    other_features) = _collect_features_for_prior_posterior_plot(
        media_mix_model, selected_features)
 
@@ -1352,7 +1353,7 @@ def plot_prior_and_posterior(
 
   i_ax = 0
   for feature in (geo_level_features + channel_level_features +
-                  seasonal_features + other_features):
+                  seasonal_features + weekday_features + other_features):
     if feature not in features:
       continue
 
@@ -1430,6 +1431,19 @@ def plot_prior_and_posterior(
                subplot_title=subplot_title,
                i_ax=i_ax,
                **kwargs_for_helper_function)
+
+    if feature in weekday_features:
+        day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        for i_weekday in range(7):
+            subplot_title = f"{feature}, day {i_weekday} ({day_names[i_weekday]})"
+            posterior_samples = np.array(media_mix_model.trace[feature][:,
+                                                                        i_weekday])
+            (fig, gridspec_fig,
+             i_ax) = _make_prior_and_posterior_subplot_for_one_feature(
+                posterior_samples=posterior_samples,
+                subplot_title=subplot_title,
+                i_ax=i_ax,
+                **kwargs_for_helper_function)
 
     if feature in other_features and feature != models._COEF_EXTRA_FEATURES:
       subplot_title = f"{feature}"
