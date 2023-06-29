@@ -240,6 +240,7 @@ class LightweightMmmTest(parameterized.TestCase):
       dict(testcase_name="_number_samples", attribute_name="_number_samples"),
       dict(testcase_name="_number_chains", attribute_name="_number_chains"),
       dict(testcase_name="_target", attribute_name="_target"),
+      dict(testcase_name="_target_is_log_scale", attribute_name="_target_is_log_scale"),
       dict(
           testcase_name="_train_media_size",
           attribute_name="_train_media_size"),
@@ -287,6 +288,7 @@ class LightweightMmmTest(parameterized.TestCase):
     mmm_object.media = jnp.ones((140, 3))
     mmm_object._media_prior = jnp.array([2., 1., 3.]) * 15
     mmm_object._target = jnp.ones((140, 1)) * 5
+    mmm_object._target_is_log_scale = False
     mmm_object.trace = {
         "media_transformed": jnp.ones((500, 140, 3)) * jnp.arange(1, 4),
         "mu": jnp.ones((500, 140)),

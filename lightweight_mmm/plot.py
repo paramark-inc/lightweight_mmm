@@ -618,7 +618,9 @@ def _create_shaded_line_plot(predictions: jnp.ndarray,
                              axis: matplotlib.axes.Axes,
                              title_prefix: str = "",
                              interval_mid_range: float = .9,
-                             digits: int = 3) -> None:
+                             digits: int = 3,
+                             target_is_log_scale: bool = False,
+                             ) -> None:
   """Creates a plot of ground truth, predicted value and credibility interval.
 
   Args:
@@ -640,8 +642,18 @@ def _create_shaded_line_plot(predictions: jnp.ndarray,
   lower_bound = jnp.quantile(a=predictions, q=lower_quantile, axis=0)
 
   r2, _ = arviz.r2_score(y_true=target, y_pred=predictions)
-  mape = 100 * metrics.mean_absolute_percentage_error(
-      y_true=target, y_pred=predictions.mean(axis=0))
+
+  if target_is_log_scale:
+    # if the target variable has been ln-scaled,
+    # un-scale with exp() before computing MAPE
+    mape = 100 * metrics.mean_absolute_percentage_error(
+        y_true=jnp.exp(target),
+        y_pred=jnp.exp(predictions).mean(axis=0)
+    )
+  else:
+    mape = 100 * metrics.mean_absolute_percentage_error(
+        y_true=target, y_pred=predictions.mean(axis=0))
+
   axis.plot(jnp.arange(target.shape[0]), target, c="grey", alpha=.9)
   axis.plot(
       jnp.arange(target.shape[0]),
@@ -671,7 +683,8 @@ def _call_fit_plotter(
     predictions: jnp.array,
     target: jnp.array,
     interval_mid_range: float,
-    digits: int) -> matplotlib.figure.Figure:
+    digits: int,
+    target_is_log_scale: bool = False) -> matplotlib.figure.Figure:
   """Calls the shaded line plot once for national and N times for geo models.
 
   Args:
@@ -695,14 +708,16 @@ def _call_fit_plotter(
                                axis=ax,
                                title_prefix=f"Geo {i}:",
                                interval_mid_range=interval_mid_range,
-                               digits=digits)
+                               digits=digits,
+                               target_is_log_scale=target_is_log_scale)
   else:  # Single plot for national model
     figure, ax = plt.subplots(1, 1)
     _create_shaded_line_plot(predictions=predictions,
                              target=target,
                              axis=ax,
                              interval_mid_range=interval_mid_range,
-                             digits=digits)
+                             digits=digits,
+                             target_is_log_scale=target_is_log_scale)
   return figure
 
 
@@ -739,11 +754,13 @@ def plot_model_fit(media_mix_model: lightweight_mmm.LightweightMMM,
       predictions=posterior_pred,
       target=target_train,
       interval_mid_range=interval_mid_range,
-      digits=digits)
+      digits=digits,
+      target_is_log_scale=media_mix_model._target_is_log_scale)
 
 
 def plot_out_of_sample_model_fit(out_of_sample_predictions: jnp.ndarray,
                                  out_of_sample_target: jnp.ndarray,
+                                 media_mix_model: lightweight_mmm.LightweightMMM = None,
                                  interval_mid_range: float = .9,
                                  digits: int = 3) -> matplotlib.figure.Figure:
   """Plots the ground truth, predicted value and interval for the test data.
@@ -761,11 +778,16 @@ def plot_out_of_sample_model_fit(out_of_sample_predictions: jnp.ndarray,
   Returns:
     Plot of model fit.
   """
+  target_is_log_scale = False
+  if media_mix_model is not None:
+    target_is_log_scale = media_mix_model._target_is_log_scale
+
   return _call_fit_plotter(
       predictions=out_of_sample_predictions,
       target=out_of_sample_target,
       interval_mid_range=interval_mid_range,
-      digits=digits)
+      digits=digits,
+      target_is_log_scale=target_is_log_scale)
 
 
 def plot_media_channel_posteriors(

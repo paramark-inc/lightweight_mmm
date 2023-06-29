@@ -160,6 +160,8 @@ class LightweightMMM:
       init=False, repr=False, hash=False, compare=True)
   _target: jax.Array = dataclasses.field(
       init=False, repr=False, hash=False, compare=True)
+  _target_is_log_scale: bool = dataclasses.field(
+      init=False, repr=False, hash=False, compare=True)
   _train_media_size: int = dataclasses.field(
       init=False, repr=False, hash=True, compare=False)
   _mcmc: numpyro.infer.MCMC = dataclasses.field(
@@ -258,6 +260,7 @@ class LightweightMMM:
       media: jnp.ndarray,
       media_prior: jnp.ndarray,
       target: jnp.ndarray,
+      target_is_log_scale: Optional[bool] = False,
       extra_features: Optional[jnp.ndarray] = None,
       degrees_seasonality: int = 2,
       seasonality_frequency: int = 52,
@@ -282,6 +285,7 @@ class LightweightMMM:
       media_prior: Costs of each media channel. The number of cost values must
         be equal to the number of media channels.
       target: Target KPI to use, like for example sales.
+      target_is_log_scale: True if target is log scale.  Used for reporting and plotting only.
       extra_features: Other variables to add to the model.
       degrees_seasonality: Number of degrees to use for seasonality. Default is
         2.
@@ -385,6 +389,7 @@ class LightweightMMM:
     self._number_samples = number_samples
     self._number_chains = number_chains
     self._target = target
+    self._target_is_log_scale = target_is_log_scale
     self._train_media_size = train_media_size
     self._degrees_seasonality = degrees_seasonality
     self._seasonality_frequency = seasonality_frequency
@@ -568,6 +573,9 @@ class LightweightMMM:
     to be passed to this function to correctly calculate media contribution
     percentage and ROI in the unscaled space.
 
+    If the target metric is in log scale, the media contribution and ROI computed
+    by this function will be in linear scale.
+
     Args:
       unscaled_costs: Optionally you can pass new costs to get these set of
         metrics. If None, the costs used for training will be used for
@@ -597,6 +605,7 @@ class LightweightMMM:
           " and ROI. If data was not scaled prior to training "
           "please ignore this warning.")
     if not target_scaler:
+      assert not self._target_is_log_scale, "Target scaler required for log scaled data"
       logging.warning("Target scaler was not given and unscaling of the target "
                       "will not occur. If your target was not scaled prior to "
                       "training you can ignore this warning.")
@@ -612,30 +621,54 @@ class LightweightMMM:
       # reshape cost to (sample, channel, geo)
       unscaled_costs = jnp.einsum("cgs->scg", unscaled_costs)
 
-    # get the scaled posterior prediction
+    # get the scaled posterior prediction.
+    # posterior_pred has shape (samples, observations) and its value is the predicted total value of the target metric
+    # for that day / week.
     posterior_pred = self.trace["mu"]
     if target_scaler:
-      unscaled_posterior_pred = target_scaler.inverse_transform(posterior_pred)
+      if self._target_is_log_scale:
+        unscaled_posterior_pred = jnp.exp(target_scaler.inverse_transform(posterior_pred))
+      else:
+        unscaled_posterior_pred = target_scaler.inverse_transform(posterior_pred)
     else:
       unscaled_posterior_pred = posterior_pred
 
-    if self.media.ndim == 2:
+    if self._target_is_log_scale:
+      # when the target is log scale, we have to separate the multiplication step (coefficient * transformed media)
+      # from the addition step (sum over observations), and unscale/unlog in between the two.
+      assert self.media.ndim == 2
+
       # s for samples, t for time, c for media channels
-      einsum_str = "stc, sc -> sc"
-    elif self.media.ndim == 3:
-      # s for samples, t for time, c for media channels, g for geo
-      einsum_str = "stcg, scg -> scg"
+      einsum_str = "stc, sc -> stc"
 
-    media_contribution = jnp.einsum(einsum_str, self.trace["media_transformed"],
-                                    jnp.squeeze(self.trace["coef_media"]))
+      # multiply coef_media over media_transformed, yielding an array with shape (samples, observations, channels).
+      media_contribution = jnp.einsum(einsum_str, self.trace["media_transformed"],
+                                      jnp.squeeze(self.trace["coef_media"]))
 
-    # aggregate posterior_pred across time:
+      # unscale, unlog, and then sum over the observations axis to change the she shape to (samples, channels)
+      media_contribution = jnp.exp(target_scaler.inverse_transform(media_contribution))
+      media_contribution = jnp.einsum("stc -> sc", media_contribution)
+
+    else:
+      if self.media.ndim == 2:
+        # s for samples, t for time, c for media channels
+        einsum_str = "stc, sc -> sc"
+      elif self.media.ndim == 3:
+        # s for samples, t for time, c for media channels, g for geo
+        einsum_str = "stcg, scg -> scg"
+
+      # media_contribution has shape (samples, media channels) and its value is the predicted contribution to
+      # the target metric for the channel, over the entire time period (so it is in the same unit as the target)
+      media_contribution = jnp.einsum(einsum_str, self.trace["media_transformed"],
+                                      jnp.squeeze(self.trace["coef_media"]))
+
+    # aggregate posterior_pred across time, changing the shape to (samples,)
     sum_scaled_prediction = jnp.sum(posterior_pred, axis=1)
-    # aggregate unscaled_posterior_pred across time:
+    # aggregate unscaled_posterior_pred across time, changing the shape to (samples,)
     sum_unscaled_prediction = jnp.sum(unscaled_posterior_pred, axis=1)
 
     if self.media.ndim == 2:
-      # add a new axis to represent channel:(sample,) -> (sample,channel)
+      # add a new axis to represent channel:(sample,) -> (sample,channel).  Changes the shape to (samples, 1).
       sum_scaled_prediction = sum_scaled_prediction[:, jnp.newaxis]
       sum_unscaled_prediction = sum_unscaled_prediction[:, jnp.newaxis]
 
@@ -654,7 +687,10 @@ class LightweightMMM:
     # media_contribution shape (sample, channel, geo)
     # sum_scaled_prediction shape (sample, channel, geo)
     # -> media_contribution_hat shape (sample, channel, geo)
-    media_contribution_hat = media_contribution / sum_scaled_prediction
+    if self._target_is_log_scale:
+      media_contribution_hat = media_contribution / sum_unscaled_prediction
+    else:
+      media_contribution_hat = media_contribution / sum_scaled_prediction
 
     # media roi = unscaled prediction * media contribution pct / unscaled costs
     # for geo leve model:
