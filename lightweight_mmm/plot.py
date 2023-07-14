@@ -291,6 +291,13 @@ def create_media_baseline_contribution_df(
       axis=0)
 
   # Adjust baseline contribution and prediction when there's any negative value.
+  # In the case of a negative baseline, we ensure that the overall height of the curve matches the
+  # daily prediction (mu), while dividing the area under the curve among the media channels according to their
+  # relative contribution.  This results in a curve with the correct total height, but where the media contribution
+  # will be decreased to compensate for the negative baseline.  For this case,
+  # 'adjusted_sum_scaled_prediction_across_samples' will be higher than the actual predictions.  By scaling the
+  # actual contribution numbers (below) based on the daily prediction, we prevent this from impacting the overall
+  # height of the curve.
   adjusted_sum_scaled_baseline_contribution_across_samples = np.where(
       sum_scaled_baseline_contribution_across_samples < 0, 0,
       sum_scaled_baseline_contribution_across_samples)
