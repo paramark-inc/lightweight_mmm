@@ -518,15 +518,16 @@ def plot_response_curves(# jax-ndarray
   last_ax = fig.add_subplot(n_rows, 1, n_rows)
   for i in range(media_mix_model.n_media_channels):
     ax = fig.add_subplot(n_rows, n_columns, i + 1)
+    y_series = jnp.exp(predictions[:, i]) if apply_log_scale else predictions[:, i]
     sns.lineplot(
         x=media_ranges[:, i],
-        y=predictions[:, i],
+        y=y_series,
         label=media_mix_model.media_names[i],
         color=_PALETTE[i],
         ax=ax)
     sns.lineplot(
         x=media_ranges[:, i],
-        y=jnp.log(predictions[:, i]) if apply_log_scale else predictions[:, i],
+        y=y_series,
         label=media_mix_model.media_names[i],
         color=_PALETTE[i],
         ax=last_ax)
