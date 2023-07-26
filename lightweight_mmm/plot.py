@@ -396,8 +396,7 @@ def _train_cost_models(media, costs_per_day):
         y=costs_input[:, channel_idx],
         deg=1
       )
-      coef = fit_series.convert().coef
-      cost_models.append(coef)
+      cost_models.append(fit_series)
 
     return cost_models
 
@@ -416,8 +415,8 @@ def _predict_costs_for_media_units(media, channel_axis, cost_models):
   costs = np.copy(media)
   with np.nditer(costs, op_flags=['readwrite'], flags=['multi_index']) as it:
     for x in it:
-      coef = cost_models[it.multi_index[channel_axis]]
-      prediction = coef[0] + coef[1] * x
+      fit_series = cost_models[it.multi_index[channel_axis]]
+      prediction = fit_series(x)
       x[...] = prediction if prediction > 0. else 0.
 
   return costs
