@@ -436,7 +436,8 @@ def plot_response_curves(# jax-ndarray
     marker_size: int = 8,
     legend_fontsize: int = 8,
     seed: Optional[int] = None,
-    costs_per_day: jnp.ndarray=None) -> matplotlib.figure.Figure:
+    costs_per_day: jnp.ndarray = None,
+    response_metric: str = "target") -> matplotlib.figure.Figure:
   """Plots the response curves of each media channel based on the model.
 
   It plots an individual subplot for each media channel. If '
@@ -480,6 +481,9 @@ def plot_response_curves(# jax-ndarray
       average cost per media unit does not vary over the time period.  When provided,
       this function fits a simple model to translate media units to spend values.
       When passing this variable, do not pass a value for 'prices'.
+    response_metric: response metric to plot.  "target" for the target metric,
+      "cost_per_target" for cost per target metric value (e.g. cost per acquisition if
+      the target metric is acquisitions)
 
   Returns:
     Plots of response curves.
@@ -492,6 +496,8 @@ def plot_response_curves(# jax-ndarray
     raise ValueError("Prices and costs_per_day are mutually exclusive.")
   if costs_per_day is not None and costs_per_day.shape != media_mix_model.media.shape:
     raise ValueError("Costs per day should have the same shape as media.")
+  if response_metric not in ["target", "cost_per_target"]:
+    raise ValueError("Invalid response_metric")
 
   media = media_mix_model.media
 
@@ -601,8 +607,20 @@ def plot_response_curves(# jax-ndarray
       average_allocation = jnp.sum(average_allocation, axis=-1)
       optimal_allocation_per_timeunit = jnp.sum(
           optimal_allocation_per_timeunit, axis=-1)
+  else:
+    average_allocation = None
+    average_allocation_predictions = None
+    optimal_allocation_predictions = None
 
-  kpi_label = "KPI" if target_scaler else "Normalized KPI"
+  if response_metric == "cost_per_target":
+    predictions = media_ranges / predictions
+    if optimal_allocation_per_timeunit is not None:
+      average_allocation_predictions = average_allocation / average_allocation_predictions
+      optimal_allocation_predictions = optimal_allocation_per_timeunit / optimal_allocation_predictions
+    kpi_label = "CPA" if target_scaler else "Normalized CPA"
+  else:
+    kpi_label = "KPI" if target_scaler else "Normalized KPI"
+
   fig = plt.figure(media_mix_model.n_media_channels + 1,
                    figsize=figure_size,
                    tight_layout=True)
