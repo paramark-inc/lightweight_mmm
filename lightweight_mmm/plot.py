@@ -371,6 +371,56 @@ def create_media_baseline_contribution_df(
   contribution_df.loc[:, "period"] = period
   return contribution_df
 
+def _train_cost_models(media, costs_per_day):
+    """Trains a simple polynomial model to translate media unit values to cost per unit values.
+
+    Args:
+      media: media units as an array [ time, channel, [geo] ]
+      costs_per_day: costs as an array [ time, channel, [geo] ]
+
+    Returns:
+      array of cost models, indexed by channel that can be used to translate media units to
+        costs.
+    """
+    if media.ndim == 3:
+      media_input = np.sum(media, axis=2)
+      costs_input = np.sum(costs_per_day, axis=2)
+    else:
+      media_input = media
+      costs_input = costs_per_day
+
+    cost_models = []
+    for channel_idx in range(media_input.shape[1]):
+      fit_series = np.polynomial.polynomial.Polynomial.fit(
+        x=media_input[:, channel_idx],
+        y=costs_input[:, channel_idx],
+        deg=1
+      )
+      coef = fit_series.convert().coef
+      cost_models.append(coef)
+
+    return cost_models
+
+def _predict_costs_for_media_units(media, channel_axis, cost_models):
+  """Predict costs from media units and return a new array with the predictions.
+
+  Args:
+    media: array of media unit values
+    channel_axis: axis number of the 'media' array representing the channel
+    cost_models: array of cost models [channel]
+
+  Returns:
+    new array with cost values, in the same shape as the media array
+
+  """
+  costs = np.copy(media)
+  with np.nditer(costs, op_flags=['readwrite'], flags=['multi_index']) as it:
+    for x in it:
+      coef = cost_models[it.multi_index[channel_axis]]
+      prediction = coef[0] + coef[1] * x
+      x[...] = prediction if prediction > 0. else 0.
+
+  return costs
 
 def plot_response_curves(# jax-ndarray
     media_mix_model: lightweight_mmm.LightweightMMM,
@@ -385,7 +435,8 @@ def plot_response_curves(# jax-ndarray
     n_columns: int = 3,
     marker_size: int = 8,
     legend_fontsize: int = 8,
-    seed: Optional[int] = None) -> matplotlib.figure.Figure:
+    seed: Optional[int] = None,
+    costs_per_day: jnp.ndarray=None) -> matplotlib.figure.Figure:
   """Plots the response curves of each media channel based on the model.
 
   It plots an individual subplot for each media channel. If '
@@ -424,6 +475,11 @@ def plot_response_curves(# jax-ndarray
     seed: Seed to use for PRNGKey during sampling. For replicability run
       this function and any other function that gets predictions with the same
       seed.
+    costs_per_day: unscaled total spend values per media channel per day. Dimensions are
+      (day, channel, [geo])).  Without this data, this function assumes that the
+      average cost per media unit does not vary over the time period.  When provided,
+      this function fits a simple model to translate media units to spend values.
+      When passing this variable, do not pass a value for 'prices'.
 
   Returns:
     Plots of response curves.
@@ -432,15 +488,35 @@ def plot_response_curves(# jax-ndarray
     raise lightweight_mmm.NotFittedModelError(
         "Model needs to be fit first before attempting to plot its response "
         "curves.")
+  if prices is not None and costs_per_day is not None:
+    raise ValueError("Prices and costs_per_day are mutually exclusive.")
+  if costs_per_day is not None and costs_per_day.shape != media_mix_model.media.shape:
+    raise ValueError("Costs per day should have the same shape as media.")
+
   media = media_mix_model.media
+
+  if costs_per_day is not None:
+    cost_models = _train_cost_models(
+      media=media_scaler.inverse_transform(media) if media_scaler else media,
+      costs_per_day=costs_per_day
+    )
+    # start the response curves at their actual min because the linear fit can show
+    # negative values for media units below the observed range
+    media_mins = media.min(axis=0)
+  else:
+    cost_models = None
+    # start the response curves at zero for backwards compatibility
+    media_mins = 0
+
   media_maxes = media.max(axis=0) * (1 + percentage_add)
   if media_mix_model._extra_features is not None:
     extra_features = jnp.expand_dims(
         media_mix_model._extra_features.mean(axis=0), axis=0)
   else:
     extra_features = None
+
   media_ranges = jnp.expand_dims(
-      jnp.linspace(start=0, stop=media_maxes, num=steps), axis=0)
+      jnp.linspace(start=media_mins, stop=media_maxes, num=steps), axis=0)
 
   make_predictions = jax.vmap(
       jax.vmap(_make_single_prediction,
@@ -476,6 +552,12 @@ def plot_response_curves(# jax-ndarray
     if media.ndim == 3:
       prices = jnp.expand_dims(prices, axis=-1)
     media_ranges *= prices
+  elif cost_models is not None:
+    media_ranges = _predict_costs_for_media_units(
+      media=media_ranges,
+      channel_axis=1,
+      cost_models=cost_models
+    )
 
   if predictions.ndim == 3:
     media_ranges = jnp.sum(media_ranges, axis=-1)
@@ -504,6 +586,17 @@ def plot_response_curves(# jax-ndarray
     if prices is not None:
       optimal_allocation_per_timeunit *= prices
       average_allocation *= prices
+    elif cost_models is not None:
+      optimal_allocation_per_timeunit = _predict_costs_for_media_units(
+        media=optimal_allocation_per_timeunit,
+        channel_axis=1,
+        cost_models=cost_models
+      )
+      average_allocation = _predict_costs_for_media_units(
+        media=average_allocation,
+        channel_axis=0,
+        cost_models=cost_models,
+      )
     if media.ndim == 3:
       average_allocation = jnp.sum(average_allocation, axis=-1)
       optimal_allocation_per_timeunit = jnp.sum(

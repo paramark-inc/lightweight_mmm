@@ -25,6 +25,8 @@ import numpy as np
 import numpyro.distributions as dist
 import pandas as pd
 
+from numpy.testing import assert_array_almost_equal
+
 from lightweight_mmm import lightweight_mmm
 from lightweight_mmm import models
 from lightweight_mmm import plot
@@ -235,6 +237,36 @@ class PlotTest(parameterized.TestCase):
           jnp.round(a=call_kwargs["x"].max().item(), decimals=4).item(),
           jnp.round(a=expected_max, decimals=4).item() * n_geos,
           places=4)
+
+  def test_response_curves_cost_model(self):
+    media = np.zeros(shape=(50, 5))
+    with np.nditer(media, op_flags=['readwrite'], flags=['multi_index']) as it:
+      for x in it:
+        x[...] = (it.multi_index[0] + 1) * (it.multi_index[1] + 1)
+    costs_per_day = media * 10.
+    cost_models = plot._train_cost_models(media=media, costs_per_day=costs_per_day)
+    predicted_costs_per_day = plot._predict_costs_for_media_units(
+      media=media,
+      channel_axis=1,
+      cost_models=cost_models
+    )
+    assert_array_almost_equal(costs_per_day, predicted_costs_per_day, decimal=2)
+
+    # now again, with geo data
+    media = np.zeros(shape=(50, 5, 3))
+    with np.nditer(media, op_flags=['readwrite'], flags=['multi_index']) as it:
+      for x in it:
+        x[...] = (it.multi_index[0] + 1) * (it.multi_index[1] + 1) * (it.multi_index[2] + 1)
+    costs_per_day = media * 10.
+    cost_models = plot._train_cost_models(media=media, costs_per_day=costs_per_day)
+    predicted_costs_per_day = plot._predict_costs_for_media_units(
+      media=media,
+      channel_axis=1,
+      cost_models=cost_models
+    )
+    assert_array_almost_equal(costs_per_day, predicted_costs_per_day, decimal=2)
+
+
 
   @parameterized.named_parameters([
       dict(
