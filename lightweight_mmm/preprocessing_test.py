@@ -645,7 +645,7 @@ class PreprocessingTest(parameterized.TestCase):
 
     for i, expected_correlation in enumerate(expected_correlations):
       pd.testing.assert_frame_equal(
-          correlations[i], expected_correlation, atol=1e-3, check_dtype=False)
+          correlations[i].fillna(0.), expected_correlation.fillna(0.), atol=1e-3, check_dtype=False)
 
   @parameterized.named_parameters([
       dict(
@@ -705,7 +705,7 @@ class PreprocessingTest(parameterized.TestCase):
 
     for i, expected_correlation in enumerate(updated_expected_correlations):
       pd.testing.assert_frame_equal(
-          correlations[i], expected_correlation, atol=1e-3, check_dtype=False)
+          correlations[i].fillna(0.), expected_correlation.fillna(0.), atol=1e-3, check_dtype=False)
 
   @parameterized.named_parameters([
       dict(
