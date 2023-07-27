@@ -969,7 +969,8 @@ def plot_bars_media_metrics(
     metric: jnp.ndarray,
     metric_name: str = "metric",
     channel_names: Optional[Tuple[Any]] = None,
-    interval_mid_range: float = .9) -> matplotlib.figure.Figure:
+    interval_mid_range: float = .9,
+    bar_height: str = "mean") -> matplotlib.figure.Figure:
   """Plots a barchart of estimated media effects with their percentile interval.
 
   The lower and upper percentile need to be between 0-1.
@@ -982,37 +983,50 @@ def plot_bars_media_metrics(
     channel_names: Names of media channels to be added to plot.
     interval_mid_range: Mid range interval to take for plotting. Eg. .9 will use
       .05 and .95 as the lower and upper quantiles. Must be a float number.
+    bar_height: "mean" to plot the mean as the bar height, "median" to plot the median
 
   Returns:
     Barplot of estimated media effects with defined percentile-bars.
   """
   if channel_names is None:
     channel_names = np.arange(np.shape(metric)[1])
+  if bar_height not in ["mean", "median"]:
+    raise ValueError("invalid bar_height")
   upper_quantile = 1 - (1 - interval_mid_range) / 2
   lower_quantile = (1 - interval_mid_range) / 2
 
   if metric.ndim == 3:
     metric = jnp.mean(metric, axis=-1)
 
+  if bar_height == "mean":
+    y_values = np.mean(metric, axis=0)
+  else:
+    y_values = np.median(metric, axis=0)
+
   fig, ax = plt.subplots(1, 1)
-  sns.barplot(data=metric, ci=None, ax=ax)
+  sns.barplot(data=metric, estimator=bar_height, errorbar=None, ax=ax)
+  for i in ax.containers:
+    ax.bar_label(i,)
+
   quantile_bounds = np.quantile(
       metric, q=[lower_quantile, upper_quantile], axis=0)
-  quantile_bounds[0] = metric.mean(axis=0) - quantile_bounds[0]
-  quantile_bounds[1] = quantile_bounds[1] - metric.mean(axis=0)
+  quantile_bounds[0] = y_values - quantile_bounds[0]
+  quantile_bounds[1] = quantile_bounds[1] - y_values
 
   ax.errorbar(
       x=np.arange(np.shape(metric)[1]),
-      y=metric.mean(axis=0),
+      y=y_values,
       yerr=quantile_bounds,
       fmt="none",
       c="black")
   ax.set_xticks(range(len(channel_names)))
   ax.set_xticklabels(channel_names, rotation=45)
+
   fig.suptitle(
-      f"Estimated media channel {metric_name}. \n Error bars show "
+      f"Estimated media channel {metric_name}.\nError bars show "
       f"{np.round(lower_quantile, 2)} - {np.round(upper_quantile, 2)} "
-      "credibility interval."
+      f"credibility interval.\nBar height shows the {bar_height} value.",
+      y=1.05
   )
   plt.close()
   return fig
