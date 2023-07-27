@@ -1016,7 +1016,7 @@ def plot_bars_media_metrics(
   ax.errorbar(
       x=np.arange(np.shape(metric)[1]),
       y=y_values,
-      yerr=quantile_bounds,
+      yerr=np.where(quantile_bounds > 0., quantile_bounds, 0.),
       fmt="none",
       c="black")
   ax.set_xticks(range(len(channel_names)))
