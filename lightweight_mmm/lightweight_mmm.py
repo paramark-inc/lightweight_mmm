@@ -1,4 +1,8 @@
+# Copyright 2023 Fastrak, Inc.
 # Copyright 2023 Google LLC.
+#
+# Adapted from the original lightweight_mmm source, available at
+# https://github.com/google/lightweight_mmm
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
