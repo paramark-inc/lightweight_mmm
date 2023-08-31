@@ -375,12 +375,13 @@ def create_media_baseline_contribution_df(
   contribution_df.loc[:, "period"] = period
   return contribution_df
 
-def _train_cost_models(media, costs_per_day):
+def _train_cost_models(media, costs_per_day, names):
     """Trains a simple polynomial model to translate media unit values to cost per unit values.
 
     Args:
       media: media units as an array [ time, channel, [geo] ]
       costs_per_day: costs as an array [ time, channel, [geo] ]
+      names: array of channel names, in the event we need to show an error
 
     Returns:
       array of cost models, indexed by channel that can be used to translate media units to
@@ -395,12 +396,23 @@ def _train_cost_models(media, costs_per_day):
 
     cost_models = []
     for channel_idx in range(media_input.shape[1]):
-      fit_series = np.polynomial.polynomial.Polynomial.fit(
-        x=media_input[:, channel_idx],
-        y=costs_input[:, channel_idx],
-        deg=1
-      )
-      cost_models.append(fit_series)
+      if not np.any(media_input[:, channel_idx]) or not np.any(costs_input[:, channel_idx]):
+        raise ValueError(
+          f'Impressions and/or costs for channel "{names[channel_idx]}" appear to '
+          "be all zeroes: this prevents fitting an impressions-to-costs model"
+        )
+
+      try:
+        fit_series = np.polynomial.polynomial.Polynomial.fit(
+          x=media_input[:, channel_idx],
+          y=costs_input[:, channel_idx],
+          deg=1
+        )
+        cost_models.append(fit_series)
+      except np.linalg.LinAlgError as e:
+        raise Exception(
+          f'Unable to fit impressions-to-costs model for channel "{names[channel_idx]}"'
+        ) from e
 
     return cost_models
 
@@ -507,7 +519,8 @@ def plot_response_curves(# jax-ndarray
   if costs_per_day is not None:
     cost_models = _train_cost_models(
       media=media_scaler.inverse_transform(media) if media_scaler else media,
-      costs_per_day=costs_per_day
+      costs_per_day=costs_per_day,
+      names=media_mix_model.media_names,
     )
     # start the response curves at their actual min because the linear fit can show
     # negative values for media units below the observed range
