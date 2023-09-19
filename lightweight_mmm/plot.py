@@ -385,7 +385,9 @@ def _train_cost_models(media, costs_per_day, names):
 
     Returns:
       array of cost models, indexed by channel that can be used to translate media units to
-        costs.
+        costs.  When either of media units or costs is all zero for a channel, the corresponding
+        element of this array will be None.  These channels should be skipped over when plotting
+        response curves.
     """
     if media.ndim == 3:
       media_input = np.sum(media, axis=2)
@@ -396,23 +398,22 @@ def _train_cost_models(media, costs_per_day, names):
 
     cost_models = []
     for channel_idx in range(media_input.shape[1]):
+      # If either media values or cost values are all zero, do not build a model for this
+      # channel.  We will skip over this channel when plotting response curves
       if not np.any(media_input[:, channel_idx]) or not np.any(costs_input[:, channel_idx]):
-        raise ValueError(
-          f'Impressions and/or costs for channel "{names[channel_idx]}" appear to '
-          "be all zeroes: this prevents fitting an impressions-to-costs model"
-        )
-
-      try:
-        fit_series = np.polynomial.polynomial.Polynomial.fit(
-          x=media_input[:, channel_idx],
-          y=costs_input[:, channel_idx],
-          deg=1
-        )
-        cost_models.append(fit_series)
-      except np.linalg.LinAlgError as e:
-        raise Exception(
-          f'Unable to fit impressions-to-costs model for channel "{names[channel_idx]}"'
-        ) from e
+        cost_models.append(None)
+      else:
+        try:
+          model = np.polynomial.polynomial.Polynomial.fit(
+            x=media_input[:, channel_idx],
+            y=costs_input[:, channel_idx],
+            deg=1,
+          )
+          cost_models.append(model)
+        except np.linalg.LinAlgError as e:
+          raise Exception(
+            f'Unable to fit impressions-to-costs model for channel "{names[channel_idx]}"'
+          ) from e
 
     return cost_models
 
@@ -421,19 +422,33 @@ def _predict_costs_for_media_units(media, channel_axis, cost_models):
 
   Args:
     media: array of media unit values
-    channel_axis: axis number of the 'media' array representing the channel
+    channel_axis: axis number of the 'media' array representing the channel.  Normally this is
+                  1 but for the average_allocation case we use a lower-dimensional array.
     cost_models: array of cost models [channel]
 
   Returns:
-    new array with cost values, in the same shape as the media array
+    new array with cost values, in the same shape as the 'media' input array
 
   """
+  # create a copy of the media unit values, which we will transform to costs in-place.
   costs = np.copy(media)
+
+  # Iterate over each element of the array and update each element separately
   with np.nditer(costs, op_flags=['readwrite'], flags=['multi_index']) as it:
     for x in it:
-      fit_series = cost_models[it.multi_index[channel_axis]]
-      prediction = fit_series(x)
-      x[...] = prediction if prediction > 0. else 0.
+      # it.multi_index[channel_axis] evalutes to the index of the column or row we are on
+      # in this iteration, depending on whether channels are in columns (channel_axis=1) or
+      # rows (channel_axis = 0) in the input media array.  This is the same as the channel index,
+      # so we can use it to fetch the relevant cost model.
+      model = cost_models[it.multi_index[channel_axis]]
+      if model is not None:
+        predicted_cost = model(x)
+      else:
+        predicted_cost = 0.
+
+      # update this single element of the array to the prediction, replacing negative values with
+      # zero.
+      x[...] = predicted_cost if predicted_cost > 0. else 0.
 
   return costs
 
@@ -525,10 +540,16 @@ def plot_response_curves(# jax-ndarray
     # start the response curves at their actual min because the linear fit can show
     # negative values for media units below the observed range
     media_mins = media.min(axis=0)
+
+    # skip response curves for the channels for which we did not produce a cost model
+    should_skip_channel = [bool(model is None) for model in cost_models]
   else:
     cost_models = None
     # start the response curves at zero for backwards compatibility
     media_mins = 0
+
+    # do not skip any response curves
+    should_skip_channel = [False] * media_mix_model.n_media_channels
 
   media_maxes = media.max(axis=0) * (1 + percentage_add)
   if media_mix_model._extra_features is not None:
@@ -645,36 +666,39 @@ def plot_response_curves(# jax-ndarray
   last_ax = fig.add_subplot(n_rows, 1, n_rows)
   for i in range(media_mix_model.n_media_channels):
     ax = fig.add_subplot(n_rows, n_columns, i + 1)
-    sns.lineplot(
-        x=media_ranges[:, i],
-        y=predictions[:, i],
-        label=media_mix_model.media_names[i],
-        color=_PALETTE[i],
-        ax=ax)
-    sns.lineplot(
-        x=media_ranges[:, i],
-        y=jnp.log(predictions[:, i]) if apply_log_scale else predictions[:, i],
-        label=media_mix_model.media_names[i],
-        color=_PALETTE[i],
-        ax=last_ax)
-    if optimal_allocation_per_timeunit is not None:
-      ax.plot(
-          average_allocation[i],
-          average_allocation_predictions[i],
-          marker="o",
-          markersize=marker_size,
-          label="avg_spend",
-          color=_PALETTE[i])
-      ax.plot(
-          optimal_allocation_per_timeunit[i],
-          optimal_allocation_predictions[i],
-          marker="x",
-          markersize=marker_size + 2,
-          label="optimal_spend",
-          color=_PALETTE[i])
-    ax.set_ylabel(kpi_label)
-    ax.set_xlabel("Normalized Spend" if not media_scaler else "Spend")
-    ax.legend(fontsize=legend_fontsize)
+    # skip channels where we could not translate impressions to costs, because there were no
+    # non-zero values for one of the two in the input data.
+    if not should_skip_channel[i]:
+      sns.lineplot(
+          x=media_ranges[:, i],
+          y=predictions[:, i],
+          label=media_mix_model.media_names[i],
+          color=_PALETTE[i],
+          ax=ax)
+      sns.lineplot(
+          x=media_ranges[:, i],
+          y=jnp.log(predictions[:, i]) if apply_log_scale else predictions[:, i],
+          label=media_mix_model.media_names[i],
+          color=_PALETTE[i],
+          ax=last_ax)
+      if optimal_allocation_per_timeunit is not None:
+        ax.plot(
+            average_allocation[i],
+            average_allocation_predictions[i],
+            marker="o",
+            markersize=marker_size,
+            label="avg_spend",
+            color=_PALETTE[i])
+        ax.plot(
+            optimal_allocation_per_timeunit[i],
+            optimal_allocation_predictions[i],
+            marker="x",
+            markersize=marker_size + 2,
+            label="optimal_spend",
+            color=_PALETTE[i])
+      ax.set_ylabel(kpi_label)
+      ax.set_xlabel("Normalized Spend" if not media_scaler else "Spend")
+      ax.legend(fontsize=legend_fontsize)
 
   fig.suptitle("Response curves", fontsize=20)
   last_ax.set_ylabel(kpi_label if not apply_log_scale else f"log({kpi_label})")

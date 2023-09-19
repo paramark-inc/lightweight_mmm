@@ -244,11 +244,12 @@ class PlotTest(parameterized.TestCase):
 
   def test_response_curves_cost_model(self):
     media = np.zeros(shape=(50, 5))
+    media_names = [f"Channel{i}" for i in range(5)]
     with np.nditer(media, op_flags=['readwrite'], flags=['multi_index']) as it:
       for x in it:
         x[...] = (it.multi_index[0] + 1) * (it.multi_index[1] + 1)
     costs_per_day = media * 10.
-    cost_models = plot._train_cost_models(media=media, costs_per_day=costs_per_day)
+    cost_models = plot._train_cost_models(media=media, costs_per_day=costs_per_day, names=media_names)
     predicted_costs_per_day = plot._predict_costs_for_media_units(
       media=media,
       channel_axis=1,
@@ -262,7 +263,7 @@ class PlotTest(parameterized.TestCase):
       for x in it:
         x[...] = (it.multi_index[0] + 1) * (it.multi_index[1] + 1) * (it.multi_index[2] + 1)
     costs_per_day = media * 10.
-    cost_models = plot._train_cost_models(media=media, costs_per_day=costs_per_day)
+    cost_models = plot._train_cost_models(media=media, costs_per_day=costs_per_day, names=media_names)
     predicted_costs_per_day = plot._predict_costs_for_media_units(
       media=media,
       channel_axis=1,
