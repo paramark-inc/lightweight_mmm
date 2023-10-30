@@ -277,7 +277,8 @@ class LightweightMMM:
       init_strategy: Callable[[Mapping[Any, Any], Any],
                               jnp.ndarray] = numpyro.infer.init_to_median,
       custom_priors: Optional[Dict[str, Prior]] = None,
-      seed: Optional[int] = None) -> None:
+      seed: Optional[int] = None,
+      progress_bar: Optional[bool] = True) -> None:
     """Fits MMM given the media data, extra features, costs and sales/KPI.
 
     For detailed information on the selected model please refer to its
@@ -312,6 +313,9 @@ class LightweightMMM:
         details.
       seed: Seed to use for PRNGKey during training. For better replicability
         run all different trainings with the same seed.
+      progress_bar: Whether to show a progress bar during sampling. According
+        to numpyro's docs, disabling the progress bar may have a small
+        performance benefit. Default True.
     """
     if media.ndim not in (2, 3):
       raise ValueError(
@@ -367,7 +371,8 @@ class LightweightMMM:
         sampler=kernel,
         num_warmup=number_warmup,
         num_samples=number_samples,
-        num_chains=number_chains)
+        num_chains=number_chains,
+        progress_bar=progress_bar)
     mcmc.run(
         rng_key=jax.random.PRNGKey(seed),
         media_data=jnp.array(media),
