@@ -404,11 +404,36 @@ def _train_cost_models(media, costs_per_day, names):
         cost_models.append(None)
       else:
         try:
+          channel_impressions = media_input[:, channel_idx]
+          channel_costs = costs_input[:, channel_idx]
+
+          # 'model' has type numpy.polynomial.polynomial.Polynomial.
           model = np.polynomial.polynomial.Polynomial.fit(
-            x=media_input[:, channel_idx],
-            y=costs_input[:, channel_idx],
+            x=channel_impressions,
+            y=channel_costs,
             deg=1,
           )
+
+          # Sometimes the linear regression will have a negative slope (i.e. as impressions
+          # increases, we predict less cost).  This can happen, for example, if impressions spikes
+          # and spend stays the same or goes down.  This can create the appearance of a negative
+          # correlation between impressions and spend.  If this happens, we override the polynomial
+          # fit with a simple aggregate cost per impression calculation for this channel.
+          slope = model.convert().coef[1]
+          if slope <= 0.0:
+            # cost_per_impression is an unscaled value
+            cost_per_impression = channel_costs.sum() / channel_impressions.sum()
+            model_convert = model.convert()
+            # since we just want to multiply impressions by the CPM to get spend, we don't need
+            # to fit a model. Instead, we create a model by passing the coefficients of interest
+            # directly.
+            model = np.polynomial.Polynomial(
+              coef=[0, cost_per_impression],
+              domain=model_convert.domain,
+              window=model_convert.window,
+              symbol=model_convert.symbol
+            )
+
           cost_models.append(model)
         except np.linalg.LinAlgError as e:
           raise Exception(
@@ -526,6 +551,8 @@ def plot_response_curves(# jax-ndarray
     raise ValueError("Prices and costs_per_day are mutually exclusive.")
   if costs_per_day is not None and costs_per_day.shape != media_mix_model.media.shape:
     raise ValueError("Costs per day should have the same shape as media.")
+  if costs_per_day is not None and media_scaler is None:
+    raise ValueError("When providing costs_per_day, you must also provide a media_scaler")
   if response_metric not in ["target", "cost_per_target"]:
     raise ValueError("Invalid response_metric")
 
