@@ -493,7 +493,16 @@ def media_mix_model(
     extra_features_effect = jnp.einsum(extra_features_einsum,
                                        extra_features,
                                        coef_extra_features)
-    prediction += extra_features_effect
+    
+    if baseline_positivity_constraint:
+      positive_extra_features = numpyro.deterministic(
+        name="positive_extra_features",
+        value=softplus(extra_features_effect),
+      )
+      prediction += positive_extra_features
+    
+    else:
+      prediction += extra_features_effect
 
   if weekday_seasonality:
     prediction += weekday_series
