@@ -354,7 +354,7 @@ def media_mix_model(
       parameter.
     extra_features: Extra features data to include in the model.
     baseline_positivity_constraint: Whether to enforce each baseline component of the linear model to be positive.
-      If true, the softmax function will be applied to the intercept, trend, and seasonality components
+      If true, the softmax function will be applied to the intercept, trend, seasonality, and extra features components
       before adding them together with the other predictors.
   """
   default_priors = _get_default_priors()

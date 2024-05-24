@@ -428,14 +428,16 @@ class LightweightMMM:
       jax.jit,
       static_argnums=(0,),
       static_argnames=("degrees_seasonality", "weekday_seasonality",
-                       "transform_function", "model"))
+                       "transform_function", "model",
+                       "baseline_positivity_constraint"))
   def _predict(
       self,
       rng_key: jnp.ndarray,
       media_data: jnp.ndarray,
       extra_features: Optional[jnp.ndarray],
       media_prior: jnp.ndarray,
-      degrees_seasonality: int, frequency: int,
+      degrees_seasonality: int, 
+      frequency: int,
       transform_function: Callable[[Any], jnp.ndarray],
       weekday_seasonality: bool,
       model: Callable[[Any], None],
