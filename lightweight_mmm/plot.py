@@ -1,4 +1,4 @@
-# Copyright 2023 Fastrak, Inc.
+# Copyright 2024 Paramark, Inc.
 # Copyright 2023 Google LLC.
 #
 # Adapted from the original lightweight_mmm source, available at
