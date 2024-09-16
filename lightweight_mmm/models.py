@@ -31,6 +31,7 @@ else:
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence, Union
 
 import immutabledict
+import jax
 import jax.numpy as jnp
 import numpyro
 from numpyro import distributions as dist
@@ -91,6 +92,44 @@ TRANSFORM_PRIORS_NAMES = immutabledict.immutabledict({
 })
 
 GEO_ONLY_PRIORS = frozenset((_COEF_SEASONALITY,))
+
+
+
+
+def softplus(
+  x: jnp.ndarray, 
+  beta: float = 1.0, 
+  threshold: float = 20.0
+):
+  """Transformation of x that constrains the values to always be positive. For a visual example
+  and the formulation this is based on see the pytorch documentation:
+    https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+  
+  This is taken with slight adjustment from this jax github issue:
+    https://github.com/google/jax/issues/18443
+  
+  Args:
+    x: the input array of values to transform
+    beta: the beta parameter in the softplus transformation, controlling the scale. The default of 1.0 is
+      typical.
+    threshold: a threshold value above which elements in x are left as-is. In other words, the transformation
+      reverts to the identity function for values of (x * beta) > threshold.
+      
+  Returns:
+    An array of the same shape as x with values transformed by the softplus function.
+  """
+  x_safe = jax.lax.select(
+    x * beta < threshold, 
+    x, 
+    jnp.ones_like(x)
+  )
+  return jax.lax.select(
+    x * beta < threshold, 
+    1./beta * jnp.log(1 + jnp.exp(beta * x_safe)), 
+    x
+  )
+
+
 
 
 def _get_default_priors() -> Mapping[str, Prior]:
@@ -291,6 +330,7 @@ def media_mix_model(
     transform_kwargs: Optional[MutableMapping[str, Any]] = None,
     weekday_seasonality: bool = False,
     extra_features: Optional[jnp.ndarray] = None,
+    baseline_positivity_constraint: bool = False,
 ) -> None:
   """Media mix model.
 
@@ -313,6 +353,9 @@ def media_mix_model(
     weekday_seasonality: In case of daily data you can estimate a weekday (7)
       parameter.
     extra_features: Extra features data to include in the model.
+    baseline_positivity_constraint: Whether to enforce each baseline component of the linear model to be positive.
+      If true, the softmax function will be applied to the intercept, trend, seasonality, and extra features components
+      before adding them together with the other predictors.
   """
   default_priors = _get_default_priors()
   data_size = media_data.shape[0]
@@ -407,11 +450,32 @@ def media_mix_model(
           name=_COEF_SEASONALITY,
           fn=custom_priors.get(
               _COEF_SEASONALITY, default_priors[_COEF_SEASONALITY]))
-  # expo_trend is B(1, 1) so that the exponent on time is in [.5, 1.5].
-  prediction = (
-      intercept + coef_trend * trend ** expo_trend +
-      seasonality * coef_seasonality +
-      jnp.einsum(media_einsum, media_transformed, coef_media))
+      
+  if not baseline_positivity_constraint:
+    # expo_trend is B(1, 1) so that the exponent on time is in [.5, 1.5].
+    prediction = (
+        intercept + coef_trend * trend ** expo_trend +
+        seasonality * coef_seasonality +
+        jnp.einsum(media_einsum, media_transformed, coef_media))
+  
+  else:
+    baseline = (
+      intercept +
+      coef_trend * trend ** expo_trend +
+      seasonality * coef_seasonality
+    )
+    
+    positive_baseline = numpyro.deterministic(
+      name="positive_baseline",
+      value=softplus(baseline),
+    )
+
+    prediction = (
+      positive_baseline +
+      jnp.einsum(media_einsum, media_transformed, coef_media)
+    )
+    
+  
   if extra_features is not None:
     plate_prefixes = ("extra_feature",)
     extra_features_einsum = "tf, f -> t"  # t = time, f = feature
@@ -429,7 +493,16 @@ def media_mix_model(
     extra_features_effect = jnp.einsum(extra_features_einsum,
                                        extra_features,
                                        coef_extra_features)
-    prediction += extra_features_effect
+    
+    if baseline_positivity_constraint:
+      positive_extra_features = numpyro.deterministic(
+        name="positive_extra_features",
+        value=softplus(extra_features_effect),
+      )
+      prediction += positive_extra_features
+    
+    else:
+      prediction += extra_features_effect
 
   if weekday_seasonality:
     prediction += weekday_series
