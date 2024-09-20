@@ -159,7 +159,7 @@ class LightweightMMM:
   custom_priors: MutableMapping[str, Prior] = dataclasses.field(
       init=False, repr=False, hash=False, compare=True)
   baseline_positivity_constraint: bool = dataclasses.field(
-      init=False, repr=False, hash=False, compare=True)
+      init=False, repr=False, hash=False, compare=True, default=False)
   _degrees_seasonality: int = dataclasses.field(init=False, repr=False)
   _weekday_seasonality: bool = dataclasses.field(init=False, repr=False)
   _media_prior: jax.Array = dataclasses.field(
