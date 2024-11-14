@@ -646,8 +646,12 @@ class LightweightMMM:
       unscaled_costs = jnp.einsum("cgs->scg", unscaled_costs)
 
     # get the scaled posterior prediction.
-    # posterior_pred has shape (samples, observations) and its value is the predicted total value of the target metric
-    # for that day / week.
+    # posterior_pred has dimensions:
+    #   0: samples
+    #   1: time
+    #   2: geo (geo models only)
+    #
+    # Its values are the predicted total value of the target metric for that day / week.
     posterior_pred = self.trace["mu"]
     if target_scaler:
       if self._target_is_log_scale:
