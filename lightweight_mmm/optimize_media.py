@@ -130,7 +130,10 @@ def _get_lower_and_upper_bounds(
     lower_pct = jnp.expand_dims(lower_pct, axis=-1)
     upper_pct = jnp.expand_dims(upper_pct, axis=-1)
 
-  mean_data = media.mean(axis=0)
+  # Original code commented out. We don't want the mean over the whole time period.
+  # Instead, we want the actual allocation in the last n_time_periods
+  # mean_data = media.mean(axis=0)
+  mean_data = media[-n_time_periods:].mean(axis=0)
   lower_bounds = jnp.maximum(mean_data * (1 - lower_pct), 0)
   upper_bounds = mean_data * (1 + upper_pct)
 
@@ -171,7 +174,10 @@ def _generate_starting_values(
     An array with the starting value for each media channel for the
       optimization.
   """
-  previous_allocation = media.mean(axis=0) * n_time_periods
+  # Original code commented out. We don't want the mean over the whole time period.
+  # Instead, we want the actual allocation in the last n_time_periods
+  # previous_allocation = media.mean(axis=0) * n_time_periods
+  previous_allocation = media[-n_time_periods:].sum(axis=0)
   if media_scaler:  # Scale before sum as geo scaler has shape (c, g).
     previous_allocation = media_scaler.inverse_transform(previous_allocation)
 
