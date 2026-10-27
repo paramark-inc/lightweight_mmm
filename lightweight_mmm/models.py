@@ -331,6 +331,7 @@ def media_mix_model(
     weekday_seasonality: bool = False,
     extra_features: Optional[jnp.ndarray] = None,
     baseline_positivity_constraint: bool = False,
+    calibration: Optional[Mapping[str, jnp.ndarray]] = None,
 ) -> None:
   """Media mix model.
 
@@ -356,6 +357,12 @@ def media_mix_model(
     baseline_positivity_constraint: Whether to enforce each baseline component of the linear model to be positive.
       If true, the softmax function will be applied to the intercept, trend, seasonality, and extra features components
       before adding them together with the other predictors.
+    calibration: Optional experiment measurements (national models only) that
+      add a likelihood term per experiment k, so the model's media contribution
+      over the experiment window is pulled toward the measured lift. Keys:
+      'row_mask' [k, time] (1.0 for rows in the window), 'channel_mask'
+      [k, channel] (1.0 for channels the experiment covers), 'lift_mean' [k]
+      and 'lift_sd' [k], both in scaled target units.
   """
   default_priors = _get_default_priors()
   data_size = media_data.shape[0]
@@ -506,6 +513,24 @@ def media_mix_model(
 
   if weekday_seasonality:
     prediction += weekday_series
+
+  if calibration is not None:
+    if media_data.ndim == 3:
+      raise ValueError("Experiment calibration is only supported for national "
+                       "models.")
+    # Media contribution by time and channel, summed over each experiment's
+    # window and channels.
+    media_contribution = media_transformed * coef_media
+    calibration_model_lift = numpyro.deterministic(
+        name="calibration_model_lift",
+        value=jnp.einsum("kt,tc,kc->k", calibration["row_mask"],
+                         media_contribution, calibration["channel_mask"]))
+    numpyro.sample(
+        name="calibration_lift",
+        fn=dist.Normal(loc=calibration_model_lift,
+                       scale=calibration["lift_sd"]),
+        obs=calibration["lift_mean"])
+
   mu = numpyro.deterministic(name="mu", value=prediction)
 
   numpyro.sample(

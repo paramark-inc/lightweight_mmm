@@ -283,7 +283,8 @@ class LightweightMMM:
                               jnp.ndarray] = numpyro.infer.init_to_median,
       custom_priors: Optional[Dict[str, Prior]] = None,
       seed: Optional[int] = None,
-      progress_bar: Optional[bool] = True) -> None:
+      progress_bar: Optional[bool] = True,
+      calibration: Optional[Mapping[str, jnp.ndarray]] = None) -> None:
     """Fits MMM given the media data, extra features, costs and sales/KPI.
 
     For detailed information on the selected model please refer to its
@@ -324,6 +325,10 @@ class LightweightMMM:
       progress_bar: Whether to show a progress bar during sampling. According
         to numpyro's docs, disabling the progress bar may have a small
         performance benefit. Default True.
+      calibration: Optional experiment measurements that add a likelihood term
+        pulling media contribution toward measured lift. Only used for
+        fitting; predictions are unaffected. See models.media_mix_model for the
+        expected keys.
     """
     if media.ndim not in (2, 3):
       raise ValueError(
@@ -392,7 +397,8 @@ class LightweightMMM:
         transform_function=self._model_transform_function,
         weekday_seasonality=weekday_seasonality,
         custom_priors=custom_priors,
-        baseline_positivity_constraint=baseline_positivity_constraint)
+        baseline_positivity_constraint=baseline_positivity_constraint,
+        calibration=calibration)
 
     self.custom_priors = custom_priors
     self.baseline_positivity_constraint = baseline_positivity_constraint
